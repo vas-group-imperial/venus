@@ -1,7 +1,13 @@
-import multiprocessing as mp
 from multiprocessing import Process
 import queue
 from timeit import default_timer as timer
+
+from sys import platform
+
+if platform == "darwin":
+    from src.queuewrapper import QueueWrapper as Queue
+else:
+    from multiprocessing import Queue
 
 from src.layersmodel import LayersModel
 from src.splittingprocess import SplittingProcess
@@ -31,7 +37,16 @@ class WorkerVerificationProcess(Process):
                 runtime = end - start
 
                 if self.PRINT_TO_CONSOLE:
-                    print("Subprocess", self.id, "finished job", job_id, "result:", res, "in", runtime)
+                    print(
+                        "Subprocess",
+                        self.id,
+                        "finished job",
+                        job_id,
+                        "result:",
+                        res,
+                        "in",
+                        runtime,
+                    )
                 self.reporting_queue.put((job_id, res, runtime, gap))
 
             except queue.Empty:
@@ -43,8 +58,9 @@ class WorkerVerificationProcess(Process):
 
 
 class VenusVerifier:
-
-    def __init__(self, nmodel, spec, encoder_params, splitting_params, print_to_console=False):
+    def __init__(
+        self, nmodel, spec, encoder_params, splitting_params, print_to_console=False
+    ):
         super(VenusVerifier, self).__init__()
 
         self.TIME_LIMIT = encoder_params.TIME_LIMIT
@@ -57,24 +73,43 @@ class VenusVerifier:
 
         # the queue to which all worker processes report the results
         # and the splitting process will store the total number of splits
-        self.reporting_queue = mp.Queue()
+        self.reporting_queue = Queue()
 
-        jobs_queue = mp.Queue()
+        jobs_queue = Queue()
 
         # compute the initial splits
-        aux_splitting_process = SplittingProcess(0, lmodel, spec, splitting_params, encoder_params,
-                                                  jobs_queue, self.reporting_queue,
-                                                  print_to_console)
+        aux_splitting_process = SplittingProcess(
+            0,
+            lmodel,
+            spec,
+            splitting_params,
+            encoder_params,
+            jobs_queue,
+            self.reporting_queue,
+            print_to_console,
+        )
         initial_splits = aux_splitting_process.get_initial_splits()
         # start a splitting process for each initial split
-        self.splitting_processes = [SplittingProcess(i+1, initial_splits[i][0], initial_splits[i][1],
-                                                     splitting_params, encoder_params,
-                                                     jobs_queue, self.reporting_queue,
-                                                     print_to_console)
-                                    for i in range(len(initial_splits))]
+        self.splitting_processes = [
+            SplittingProcess(
+                i + 1,
+                initial_splits[i][0],
+                initial_splits[i][1],
+                splitting_params,
+                encoder_params,
+                jobs_queue,
+                self.reporting_queue,
+                print_to_console,
+            )
+            for i in range(len(initial_splits))
+        ]
 
-        self.worker_processes = [WorkerVerificationProcess(i+1, jobs_queue, self.reporting_queue, print_to_console)
-                                 for i in range(self.PARALLEL_PROCESSES_NUMBER)]
+        self.worker_processes = [
+            WorkerVerificationProcess(
+                i + 1, jobs_queue, self.reporting_queue, print_to_console
+            )
+            for i in range(self.PARALLEL_PROCESSES_NUMBER)
+        ]
 
         self.PRINT_TO_CONSOLE = print_to_console
 
@@ -102,12 +137,14 @@ class VenusVerifier:
         """
         while True:
             try:
-                job_id, res, runtime, extra = self.reporting_queue.get(timeout=self.TIME_LIMIT - (timer() - start))
+                job_id, res, runtime, extra = self.reporting_queue.get(
+                    timeout=self.TIME_LIMIT - (timer() - start)
+                )
 
                 if res == True:
                     if self.PRINT_TO_CONSOLE:
                         print("Main process: read True. Terminating...")
-                    result = ("True", "{}".format(finished_jobs_count+1), extra)
+                    result = ("True", "{}".format(finished_jobs_count + 1), extra)
                     break
 
                 elif res == False:
@@ -128,10 +165,16 @@ class VenusVerifier:
                     raise Exception("Unexpected result read from reporting queue", res)
 
                 # stopping conditions
-                if total_number_of_splits != -1 and finished_splitting_processes_count == len(self.splitting_processes) and\
-                        finished_jobs_count >= total_number_of_splits:
+                if (
+                    total_number_of_splits != -1
+                    and finished_splitting_processes_count
+                    == len(self.splitting_processes)
+                    and finished_jobs_count >= total_number_of_splits
+                ):
                     if self.PRINT_TO_CONSOLE:
-                        print("Main process: all subproblems have finished. Terminating...")
+                        print(
+                            "Main process: all subproblems have finished. Terminating..."
+                        )
                     if timedout_jobs_count == 0:
                         result = ("False", total_number_of_splits, None)
                     else:
